@@ -7,33 +7,44 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat.startActivity
+import app.cash.molecule.AndroidUiDispatcher
+import app.cash.molecule.RecompositionClock
+import app.cash.molecule.launchMolecule
 import com.example.instantmessage.ui.theme.InstantMessageTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private val scope = CoroutineScope(AndroidUiDispatcher.Main)
+    private val inputFlow = MutableSharedFlow<String>()
+
+    private val model = scope.launchMolecule(clock = RecompositionClock.ContextClock) {
+        SendMessagePresenter(userInput = inputFlow)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             InstantMessageTheme {
-                // A surface container using the 'background' color from the theme
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colors.background
                 ) {
-                    Content()
+                    val scope = rememberCoroutineScope()
+                    Content(
+                        model = model,
+                        onInputValue = { scope.launch { inputFlow.emit(it) } }
+                    )
                 }
             }
         }
@@ -41,18 +52,26 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Content() {
+fun Content(model: StateFlow<PhoneState>, onInputValue: (String) -> Unit) {
     val context = LocalContext.current
-    val textInput = remember { mutableStateOf("") }
+    val phone by model.collectAsState()
     PhoneScreen(
-        text = textInput.value,
-        onTextChanged = { text -> textInput.value = text },
-        onButtonClick = { intentToWhatsApp(context, textInput.value) }
+        enabled = phone.isValid,
+        text = phone.number,
+        onTextChanged = {
+            onInputValue.invoke(it)
+        },
+        onButtonClick = { intentToWhatsApp(context, phone.number) }
     )
 }
 
 @Composable
-fun PhoneScreen(text:String, onTextChanged: (String) -> Unit, onButtonClick: () -> Unit) {
+fun PhoneScreen(
+    text: String,
+    onTextChanged: (String) -> Unit,
+    onButtonClick: () -> Unit,
+    enabled: Boolean
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
 
         TextField(
@@ -65,7 +84,10 @@ fun PhoneScreen(text:String, onTextChanged: (String) -> Unit, onButtonClick: () 
             keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
         )
 
-        Button(onClick = onButtonClick) {
+        Button(
+            enabled = enabled,
+            onClick = onButtonClick
+        ) {
             Text(text = "Send")
         }
     }
@@ -78,13 +100,4 @@ fun intentToWhatsApp(context: Context, phone: String) {
             Uri.parse("https://api.whatsapp.com/send?phone=$phone")
         )
     )
-}
-
-
-@Preview(showBackground = true)
-@Composable
-fun DefaultPreview() {
-    InstantMessageTheme {
-        Content()
-    }
 }
